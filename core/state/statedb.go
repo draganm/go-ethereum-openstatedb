@@ -179,7 +179,13 @@ func New(root common.Hash, db Database) (*StateDB, error) {
 }
 
 func (s *StateDB) GetStateObjects() map[common.Address]*StateObject {
-	return maps.Clone(s.stateObjects)
+
+	ret := make(map[common.Address]*StateObject)
+	for addr := range s.journal.dirties {
+		ret[addr] = s.stateObjects[addr]
+	}
+
+	return ret
 }
 
 // NewWithReader creates a new state for the specified state root. Unlike New,
