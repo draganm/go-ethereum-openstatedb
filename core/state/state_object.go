@@ -41,13 +41,13 @@ func (s Storage) Copy() Storage {
 	return maps.Clone(s)
 }
 
-// stateObject represents an Ethereum account which is being modified.
+// StateObject represents an Ethereum account which is being modified.
 //
 // The usage pattern is as follows:
 // - First you need to obtain a state object.
 // - Account values as well as storages can be accessed and modified through the object.
 // - Finally, call commit to return the changes of storage trie and update account data.
-type stateObject struct {
+type StateObject struct {
 	db          *StateDB
 	address     common.Address      // address of ethereum account
 	addressHash *common.Hash        // hash of ethereum address of the account
@@ -89,17 +89,17 @@ type stateObject struct {
 }
 
 // empty returns whether the account is considered empty.
-func (s *stateObject) empty() bool {
+func (s *StateObject) empty() bool {
 	return s.data.Nonce == 0 && s.data.Balance.IsZero() && bytes.Equal(s.data.CodeHash, types.EmptyCodeHash.Bytes())
 }
 
 // newObject creates a state object.
-func newObject(db *StateDB, address common.Address, acct *types.StateAccount) *stateObject {
+func newObject(db *StateDB, address common.Address, acct *types.StateAccount) *StateObject {
 	origin := acct
 	if acct == nil {
 		acct = types.NewEmptyStateAccount()
 	}
-	return &stateObject{
+	return &StateObject{
 		db:                 db,
 		address:            address,
 		origin:             origin,
@@ -111,7 +111,7 @@ func newObject(db *StateDB, address common.Address, acct *types.StateAccount) *s
 	}
 }
 
-func (s *stateObject) addrHash() common.Hash {
+func (s *StateObject) addrHash() common.Hash {
 	if s.addressHash == nil {
 		h := crypto.Keccak256Hash(s.address[:])
 		s.addressHash = &h
@@ -119,11 +119,11 @@ func (s *stateObject) addrHash() common.Hash {
 	return *s.addressHash
 }
 
-func (s *stateObject) markSelfdestructed() {
+func (s *StateObject) markSelfdestructed() {
 	s.selfDestructed = true
 }
 
-func (s *stateObject) touch() {
+func (s *StateObject) touch() {
 	s.db.journal.touchChange(s.address)
 }
 
@@ -132,7 +132,7 @@ func (s *stateObject) touch() {
 //
 // If a new trie is opened, it will be cached within the state object to allow
 // subsequent reads to expand the same trie instead of reloading from disk.
-func (s *stateObject) getTrie() (Trie, error) {
+func (s *StateObject) getTrie() (Trie, error) {
 	if s.trie == nil {
 		// Assumes the primary account trie is already loaded
 		tr, err := s.db.db.OpenStorageTrie(s.db.originalRoot, s.address, s.data.Root, s.db.trie)
@@ -151,7 +151,7 @@ func (s *stateObject) getTrie() (Trie, error) {
 // trie in the state object. The caller might want to do that, but it's cleaner
 // to break the hidden interdependency between retrieving tries from the db or
 // from the prefetcher.
-func (s *stateObject) getPrefetchedTrie() Trie {
+func (s *StateObject) getPrefetchedTrie() Trie {
 	// If there's nothing to meaningfully return, let the user figure it out by
 	// pulling the trie from disk.
 	if (s.data.Root == types.EmptyRootHash && !s.db.db.TrieDB().IsVerkle()) || s.db.prefetcher == nil {
@@ -162,14 +162,14 @@ func (s *stateObject) getPrefetchedTrie() Trie {
 }
 
 // GetState retrieves a value associated with the given storage key.
-func (s *stateObject) GetState(key common.Hash) common.Hash {
+func (s *StateObject) GetState(key common.Hash) common.Hash {
 	value, _ := s.getState(key)
 	return value
 }
 
 // getState retrieves a value associated with the given storage key, along with
 // its original value.
-func (s *stateObject) getState(key common.Hash) (common.Hash, common.Hash) {
+func (s *StateObject) getState(key common.Hash) (common.Hash, common.Hash) {
 	origin := s.GetCommittedState(key)
 	value, dirty := s.dirtyStorage[key]
 	if dirty {
@@ -180,7 +180,7 @@ func (s *stateObject) getState(key common.Hash) (common.Hash, common.Hash) {
 
 // GetCommittedState retrieves the value associated with the specific key
 // without any mutations caused in the current execution.
-func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
+func (s *StateObject) GetCommittedState(key common.Hash) common.Hash {
 	// If we have a pending write or clean cached, return that
 	if value, pending := s.pendingStorage[key]; pending {
 		return value
@@ -220,7 +220,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 
 // SetState updates a value in account storage.
 // It returns the previous value
-func (s *stateObject) SetState(key, value common.Hash) common.Hash {
+func (s *StateObject) SetState(key, value common.Hash) common.Hash {
 	// If the new value is the same as old, don't set. Otherwise, track only the
 	// dirty changes, supporting reverting all of it back to no change.
 	prev, origin := s.getState(key)
@@ -235,7 +235,7 @@ func (s *stateObject) SetState(key, value common.Hash) common.Hash {
 
 // setState updates a value in account dirty storage. The dirtiness will be
 // removed if the value being set equals to the original value.
-func (s *stateObject) setState(key common.Hash, value common.Hash, origin common.Hash) {
+func (s *StateObject) setState(key common.Hash, value common.Hash, origin common.Hash) {
 	// Storage slot is set back to its original value, undo the dirty marker
 	if value == origin {
 		delete(s.dirtyStorage, key)
@@ -246,7 +246,7 @@ func (s *stateObject) setState(key common.Hash, value common.Hash, origin common
 
 // finalise moves all dirty storage slots into the pending area to be hashed or
 // committed later. It is invoked at the end of every transaction.
-func (s *stateObject) finalise() {
+func (s *StateObject) finalise() {
 	slotsToPrefetch := make([]common.Hash, 0, len(s.dirtyStorage))
 	for key, value := range s.dirtyStorage {
 		if origin, exist := s.uncommittedStorage[key]; exist && origin == value {
@@ -292,7 +292,7 @@ func (s *stateObject) finalise() {
 // storage change at all.
 //
 // It assumes all the dirty storage slots have been finalized before.
-func (s *stateObject) updateTrie() (Trie, error) {
+func (s *StateObject) updateTrie() (Trie, error) {
 	// Short circuit if nothing was accessed, don't trigger a prefetcher warning
 	if len(s.uncommittedStorage) == 0 {
 		// Nothing was written, so we could stop early. Unless we have both reads
@@ -374,7 +374,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 
 // updateRoot flushes all cached storage mutations to trie, recalculating the
 // new storage trie root.
-func (s *stateObject) updateRoot() {
+func (s *StateObject) updateRoot() {
 	// Flush cached storage mutations into trie, short circuit if any error
 	// is occurred or there is no change in the trie.
 	tr, err := s.updateTrie()
@@ -386,7 +386,7 @@ func (s *stateObject) updateRoot() {
 
 // commitStorage overwrites the clean storage with the storage changes and
 // fulfills the storage diffs into the given accountUpdate struct.
-func (s *stateObject) commitStorage(op *accountUpdate) {
+func (s *StateObject) commitStorage(op *accountUpdate) {
 	var (
 		encode = func(val common.Hash) []byte {
 			if val == (common.Hash{}) {
@@ -431,7 +431,7 @@ func (s *stateObject) commitStorage(op *accountUpdate) {
 //
 // Note, commit may run concurrently across all the state objects. Do not assume
 // thread-safe access to the statedb.
-func (s *stateObject) commit() (*accountUpdate, *trienode.NodeSet, error) {
+func (s *StateObject) commit() (*accountUpdate, *trienode.NodeSet, error) {
 	// commit the account metadata changes
 	op := &accountUpdate{
 		address: s.address,
@@ -470,7 +470,7 @@ func (s *stateObject) commit() (*accountUpdate, *trienode.NodeSet, error) {
 // AddBalance adds amount to s's balance.
 // It is used to add funds to the destination account of a transfer.
 // returns the previous balance
-func (s *stateObject) AddBalance(amount *uint256.Int) uint256.Int {
+func (s *StateObject) AddBalance(amount *uint256.Int) uint256.Int {
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
@@ -483,19 +483,19 @@ func (s *stateObject) AddBalance(amount *uint256.Int) uint256.Int {
 }
 
 // SetBalance sets the balance for the object, and returns the previous balance.
-func (s *stateObject) SetBalance(amount *uint256.Int) uint256.Int {
+func (s *StateObject) SetBalance(amount *uint256.Int) uint256.Int {
 	prev := *s.data.Balance
 	s.db.journal.balanceChange(s.address, s.data.Balance)
 	s.setBalance(amount)
 	return prev
 }
 
-func (s *stateObject) setBalance(amount *uint256.Int) {
+func (s *StateObject) setBalance(amount *uint256.Int) {
 	s.data.Balance = amount
 }
 
-func (s *stateObject) deepCopy(db *StateDB) *stateObject {
-	obj := &stateObject{
+func (s *StateObject) deepCopy(db *StateDB) *StateObject {
+	obj := &StateObject{
 		db:                 db,
 		address:            s.address,
 		addressHash:        nil,
@@ -533,12 +533,12 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 //
 
 // Address returns the address of the contract/account
-func (s *stateObject) Address() common.Address {
+func (s *StateObject) Address() common.Address {
 	return s.address
 }
 
 // Code returns the contract code associated with this object, if any.
-func (s *stateObject) Code() []byte {
+func (s *StateObject) Code() []byte {
 	if len(s.code) != 0 {
 		return s.code
 	}
@@ -565,7 +565,7 @@ func (s *stateObject) Code() []byte {
 // CodeSize returns the size of the contract code associated with this object,
 // or zero if none. This method is an almost mirror of Code, but uses a cache
 // inside the database to avoid loading codes seen recently.
-func (s *stateObject) CodeSize() int {
+func (s *StateObject) CodeSize() int {
 	if len(s.code) != 0 {
 		return len(s.code)
 	}
@@ -587,40 +587,40 @@ func (s *stateObject) CodeSize() int {
 	return size
 }
 
-func (s *stateObject) SetCode(codeHash common.Hash, code []byte) (prev []byte) {
+func (s *StateObject) SetCode(codeHash common.Hash, code []byte) (prev []byte) {
 	prev = slices.Clone(s.code)
 	s.db.journal.setCode(s.address, prev)
 	s.setCode(codeHash, code)
 	return prev
 }
 
-func (s *stateObject) setCode(codeHash common.Hash, code []byte) {
+func (s *StateObject) setCode(codeHash common.Hash, code []byte) {
 	s.code = code
 	s.data.CodeHash = codeHash[:]
 	s.dirtyCode = true
 }
 
-func (s *stateObject) SetNonce(nonce uint64) {
+func (s *StateObject) SetNonce(nonce uint64) {
 	s.db.journal.nonceChange(s.address, s.data.Nonce)
 	s.setNonce(nonce)
 }
 
-func (s *stateObject) setNonce(nonce uint64) {
+func (s *StateObject) setNonce(nonce uint64) {
 	s.data.Nonce = nonce
 }
 
-func (s *stateObject) CodeHash() []byte {
+func (s *StateObject) CodeHash() []byte {
 	return s.data.CodeHash
 }
 
-func (s *stateObject) Balance() *uint256.Int {
+func (s *StateObject) Balance() *uint256.Int {
 	return s.data.Balance
 }
 
-func (s *stateObject) Nonce() uint64 {
+func (s *StateObject) Nonce() uint64 {
 	return s.data.Nonce
 }
 
-func (s *stateObject) Root() common.Hash {
+func (s *StateObject) Root() common.Hash {
 	return s.data.Root
 }

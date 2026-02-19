@@ -88,14 +88,14 @@ type StateDB struct {
 
 	// This map holds 'live' objects, which will get modified while
 	// processing a state transition.
-	stateObjects map[common.Address]*stateObject
+	stateObjects map[common.Address]*StateObject
 
 	// This map holds 'deleted' objects. An object with the same address
 	// might also occur in the 'stateObjects' map due to account
 	// resurrection. The account value is tracked as the original value
 	// before the transition. This map is populated at the transaction
 	// boundaries.
-	stateObjectsDestruct map[common.Address]*stateObject
+	stateObjectsDestruct map[common.Address]*StateObject
 
 	// This map tracks the account mutations that occurred during the
 	// transition. Uncommitted mutations belonging to the same account
@@ -178,6 +178,10 @@ func New(root common.Hash, db Database) (*StateDB, error) {
 	return NewWithReader(root, db, reader)
 }
 
+func (s *StateDB) GetStateObjects() map[common.Address]*StateObject {
+	return maps.Clone(s.stateObjects)
+}
+
 // NewWithReader creates a new state for the specified state root. Unlike New,
 // this function accepts an additional Reader which is bound to the given root.
 func NewWithReader(root common.Hash, db Database, reader Reader) (*StateDB, error) {
@@ -185,8 +189,8 @@ func NewWithReader(root common.Hash, db Database, reader Reader) (*StateDB, erro
 		db:                   db,
 		originalRoot:         root,
 		reader:               reader,
-		stateObjects:         make(map[common.Address]*stateObject),
-		stateObjectsDestruct: make(map[common.Address]*stateObject),
+		stateObjects:         make(map[common.Address]*StateObject),
+		stateObjectsDestruct: make(map[common.Address]*StateObject),
 		mutations:            make(map[common.Address]*mutation),
 		logs:                 make(map[common.Hash][]*types.Log),
 		preimages:            make(map[common.Hash][]byte),
@@ -561,7 +565,7 @@ func (s *StateDB) GetTransientState(addr common.Address, key common.Hash) common
 //
 
 // updateStateObject writes the given object to the trie.
-func (s *StateDB) updateStateObject(obj *stateObject) {
+func (s *StateDB) updateStateObject(obj *StateObject) {
 	// Encode the account and update the account trie
 	if err := s.trie.UpdateAccount(obj.Address(), &obj.data, len(obj.code)); err != nil {
 		s.setError(fmt.Errorf("updateStateObject (%x) error: %v", obj.Address(), err))
@@ -580,7 +584,7 @@ func (s *StateDB) deleteStateObject(addr common.Address) {
 
 // getStateObject retrieves a state object given by the address, returning nil if
 // the object is not found or was deleted in this execution context.
-func (s *StateDB) getStateObject(addr common.Address) *stateObject {
+func (s *StateDB) getStateObject(addr common.Address) *StateObject {
 	// Prefer live objects if any is available
 	if obj := s.stateObjects[addr]; obj != nil {
 		return obj
@@ -615,12 +619,12 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	return obj
 }
 
-func (s *StateDB) setStateObject(object *stateObject) {
+func (s *StateDB) setStateObject(object *StateObject) {
 	s.stateObjects[object.Address()] = object
 }
 
 // getOrNewStateObject retrieves a state object or create a new state object if nil.
-func (s *StateDB) getOrNewStateObject(addr common.Address) *stateObject {
+func (s *StateDB) getOrNewStateObject(addr common.Address) *StateObject {
 	obj := s.getStateObject(addr)
 	if obj == nil {
 		obj = s.createObject(addr)
@@ -630,7 +634,7 @@ func (s *StateDB) getOrNewStateObject(addr common.Address) *stateObject {
 
 // createObject creates a new state object. The assumption is held there is no
 // existing account with the given address, otherwise it will be silently overwritten.
-func (s *StateDB) createObject(addr common.Address) *stateObject {
+func (s *StateDB) createObject(addr common.Address) *StateObject {
 	obj := newObject(s, addr, nil)
 	s.journal.createObject(addr)
 	s.setStateObject(obj)
@@ -676,8 +680,8 @@ func (s *StateDB) Copy() *StateDB {
 		db:                   s.db,
 		reader:               s.reader,
 		originalRoot:         s.originalRoot,
-		stateObjects:         make(map[common.Address]*stateObject, len(s.stateObjects)),
-		stateObjectsDestruct: make(map[common.Address]*stateObject, len(s.stateObjectsDestruct)),
+		stateObjects:         make(map[common.Address]*StateObject, len(s.stateObjects)),
+		stateObjectsDestruct: make(map[common.Address]*StateObject, len(s.stateObjectsDestruct)),
 		mutations:            make(map[common.Address]*mutation, len(s.mutations)),
 		dbErr:                s.dbErr,
 		refund:               s.refund,
@@ -1313,7 +1317,7 @@ func (s *StateDB) commit(deleteEmptyObjects bool, noStorageWiping bool, blockNum
 
 	// Clear all internal flags and update state root at the end.
 	s.mutations = make(map[common.Address]*mutation)
-	s.stateObjectsDestruct = make(map[common.Address]*stateObject)
+	s.stateObjectsDestruct = make(map[common.Address]*StateObject)
 
 	origin := s.originalRoot
 	s.originalRoot = root
