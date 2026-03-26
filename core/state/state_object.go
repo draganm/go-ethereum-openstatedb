@@ -93,6 +93,14 @@ func (s *StateObject) empty() bool {
 	return s.data.Nonce == 0 && s.data.Balance.IsZero() && bytes.Equal(s.data.CodeHash, types.EmptyCodeHash.Bytes())
 }
 
+func (s *StateObject) IsSelfDestructed() bool {
+	return s.selfDestructed
+}
+
+func (s *StateObject) IsNewContract() bool {
+	return s.newContract
+}
+
 // newObject creates a state object.
 func newObject(db *StateDB, address common.Address, acct *types.StateAccount) *StateObject {
 	origin := acct
